@@ -1,0 +1,64 @@
+name: Deploy Rubik Universe to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Prepare website files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf _site _rubik_extract
+          mkdir -p _site
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname 'Rubik-Universe-*.zip' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+          if [[ -n "$ZIP_FILE" ]]; then
+            echo "Found project archive: $ZIP_FILE"
+            mkdir -p _rubik_extract
+            unzip -q "$ZIP_FILE" -d _rubik_extract
+            INDEX_FILE="$(find _rubik_extract -type f -name index.html -print -quit)"
+            if [[ -z "$INDEX_FILE" ]]; then echo 'ZIP does not contain index.html'; exit 1; fi
+            SITE_ROOT="$(dirname "$INDEX_FILE")"
+            cp -a "$SITE_ROOT"/. _site/
+            rm -rf _site/.github
+          else
+            echo 'No Rubik-Universe ZIP found; publishing repository website files.'
+            rsync -a --exclude='.git' --exclude='.github' --exclude='_site' --exclude='*.zip' ./ _site/
+          fi
+          test -f _site/index.html || { echo 'index.html missing from publish directory'; exit 1; }
+          touch _site/.nojekyll
+          echo 'Files ready for GitHub Pages:'
+          find _site -maxdepth 2 -type f | sort | head -80
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
